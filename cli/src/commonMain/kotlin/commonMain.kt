@@ -1,11 +1,19 @@
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.subcommands
-import okio.FileSystem
+import com.github.ajalt.clikt.parameters.options.flag
+import com.github.ajalt.clikt.parameters.options.help
+import com.github.ajalt.clikt.parameters.options.option
+import io.github.oshai.kotlinlogging.Level
 
-class Cli : CliktCommand(name = "taglinter") {
-    override fun run() = Unit
+class Cli(private val ctx: CliContext) : CliktCommand(name = "taglinter") {
+    private val debug by option("-d", "--debug").flag().help(help = "enable debug logging")
+    override fun run() {
+        if (debug) {
+            ctx.setLogLevel(Level.TRACE)
+        }
+    }
 }
 
-fun commonMain(args: Array<String>, fs: FileSystem) {
-    Cli().subcommands(CheckCommand(fs)).main(args)
+fun commonMain(ctx: CliContext) {
+    Cli(ctx).subcommands(CheckCommand(ctx.fs)).main(ctx.args)
 }
