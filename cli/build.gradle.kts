@@ -58,7 +58,14 @@ kotlin {
         else -> throw GradleException("Host OS is not supported in Kotlin/Native.")
     }
 
-    nativeTarget.binaries { executable { baseName = "taglinter" } }
+    nativeTarget.binaries {
+        executable("taglinter", listOf(RELEASE)) {
+//            linkerOpts = mutableListOf("-static", /*"-static-libgcc", "-static-libstdc++",*/ "-s", "-lpthread", "-lglibc")
+//            linkerOpts = mutableListOf("-static", "-lpthread")
+        }
+        executable("taglinter", listOf(DEBUG)) {
+        }
+    }
 
     sourceSets {
         val okioVersion = "3.10.2"
@@ -75,8 +82,6 @@ kotlin {
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-//                implementation("org.jetbrains.kotlinx:kotlinx-io-core:0.3.0")
-//                implementation("com.github.ajalt.mordant:mordant:2.1.0")
             }
         }
         val jvmMain by getting {
@@ -90,7 +95,6 @@ kotlin {
         val jvmTest by getting
         val jsMain by getting {
             dependencies {
-//                implementation("org.jetbrains.kotlinx:kotlinx-io-core:0.3.0")
                 implementation("com.squareup.okio:okio-nodefilesystem:$okioVersion")
                 implementation("io.github.oshai:kotlin-logging-js:$kotlinLoggingVersion")
             }

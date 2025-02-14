@@ -41,6 +41,8 @@ class TagChecker(private val fs: FileSystem) {
         }
     }
 
+    val allTags: Map<String, List<TagRecord>> get() = tags
+
     fun getDuplicates(): List<DuplicatesInfo> {
         val res = mutableListOf<DuplicatesInfo>()
         tags.forEach { (tag, records) ->
