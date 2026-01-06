@@ -11,46 +11,83 @@ private val logger = KotlinLogging.logger(FixCommand::class.simpleName!!)
 
 typealias FileContent = MutableList<String>
 
+private class Files(val fs: FileSystem) {
+
+    private val files = mutableMapOf<String, FileContent>()
+
+    fun getFileContext(path: String): FileContent =
+        files.getOrPut(path) {
+            fs.read(path.toPath()) { readUtf8() }.split("\n").toMutableList()
+        }
+
+    fun getAll(): Map<String, FileContent> = files
+}
+
 class FixCommand(fs: FileSystem) : BaseInspectionCommand(
     fs = fs,
     name = "fix",
-    help = "Fix duplicates"
+    help = "Fix tags"
 ) {
     private val dryRun: Boolean by option("--dry-run").flag()
         .help("Do not write changes to files")
 
-    override fun processDuplicates(duplicates: List<TagChecker.DuplicatesInfo>, tagChecker: TagChecker) {
-        val t = Terminal()
+    private val disableDuplicatesOption: Boolean by option("--no-duplicates").flag()
+        .help("Do not fix duplicates")
+    private val disableInvalidOption: Boolean by option("--no-invalid").flag()
+        .help("Do not fix invalid tags")
+
+    private fun fixTag(t: Terminal, tagRecord: TagChecker.TagRecord, files: Files, existingTags: MutableSet<String>) {
+        val fileContent = files.getFileContext(tagRecord.file)
+        val newTag = generateTag(existingTags)
+        t.println(
+            "✔ ${TextColors.brightWhite(tagRecord.tag)} -> ${TextColors.brightWhite(newTag)} : ${tagRecord.file}:${tagRecord.lineIndex + 1}:${tagRecord.pos + 1}"
+        )
+        existingTags.add(newTag)
+        val line = fileContent[tagRecord.lineIndex]
+        val newLine = line.replaceRange(tagRecord.pos, tagRecord.pos + newTag.length, newTag)
+        fileContent[tagRecord.lineIndex] = newLine
+        logger.debug { "<8355a4ae> New line: $newLine" }
+    }
+
+    private fun fixDuplicates(
+        t: Terminal,
+        tagChecker: TagChecker,
+        existingTags: MutableSet<String>,
+        files: Files
+    ) {
+        val duplicates = tagChecker.getDuplicates()
         if (duplicates.isEmpty()) {
             t.println(TextColors.brightGreen("\uD83D\uDC4D There are no duplicates to fix"))
             return
         }
-
-        val existingTags = tagChecker.allTags.keys.toMutableSet()
-        val files = mutableMapOf<String, FileContent>()
 
         val toFix = duplicates.sumOf { d -> d.recs.size - 1 }
         t.println(TextColors.brightYellow("Fixing ${TextColors.brightWhite(toFix.toString())} duplicate(s):"))
         duplicates.forEach { duplicate ->
             val recsToCorrect = duplicate.recs.subList(1, duplicate.recs.size)
             recsToCorrect.forEach { tagRecord ->
-                val fileContent = files.getOrPut(tagRecord.file) {
-                    fs.read(tagRecord.file.toPath()) { readUtf8() }.split("\n").toMutableList()
-                }
-                val newTag = generateTag(existingTags)
-                t.println(
-                    "✔ ${TextColors.brightWhite(duplicate.tag)} -> ${TextColors.brightWhite(newTag)} : ${tagRecord.file}:${tagRecord.lineIndex}:${tagRecord.pos}"
-                )
-                existingTags.add(newTag)
-                val line = fileContent[tagRecord.lineIndex]
-                val newLine = line.replaceRange(tagRecord.pos, tagRecord.pos + newTag.length, newTag)
-                fileContent[tagRecord.lineIndex] = newLine
-                logger.debug { "<8355a4ae> New line: $newLine" }
+                fixTag(t, tagRecord, files, existingTags)
             }
         }
+    }
 
-        t.println(TextColors.brightYellow("Writing ${TextColors.brightWhite(files.size.toString())} file(s):"))
-        files.forEach { file ->
+    private fun fixInvalidTags(t: Terminal, tagChecker: TagChecker, existingTags: MutableSet<String>, files: Files) {
+        val invalidTags = tagChecker.getInvalidTags()
+        if (invalidTags.isEmpty()) {
+            t.println(TextColors.brightGreen("\uD83D\uDC4D There are no invalid tags to fix"))
+            return
+        }
+        val toFix = invalidTags.size
+        t.println(TextColors.brightYellow("Fixing ${TextColors.brightWhite(toFix.toString())} invalid tag(s):"))
+        invalidTags.forEach { tagRecord ->
+            fixTag(t, tagRecord, files, existingTags)
+        }
+    }
+
+    private fun writeFiles(t: Terminal, files: Files) {
+        val allFiles = files.getAll()
+        t.println(TextColors.brightYellow("Writing ${TextColors.brightWhite(allFiles.size.toString())} file(s):"))
+        allFiles.forEach { file ->
             t.println(
                 "✔ ${TextColors.brightWhite(file.key)}"
             )
@@ -61,9 +98,26 @@ class FixCommand(fs: FileSystem) : BaseInspectionCommand(
             }
         }
         if (!dryRun) {
-            t.println(TextColors.brightGreen("✅ All duplicates fixed"))
+            t.println(TextColors.brightGreen("✅ All errors fixed and changes saved"))
         } else {
             t.println(TextColors.brightYellow("❌ Changes have not been saved. Dry-run enabled"))
         }
+    }
+
+    override fun process(tagChecker: TagChecker): Boolean {
+        val t = Terminal()
+        val existingTags = tagChecker.allTags.map { it.tag }.toMutableSet()
+        val files = Files(fs)
+
+        if (!disableDuplicatesOption) {
+            fixDuplicates(t, tagChecker, existingTags, files)
+        }
+
+        if (!disableInvalidOption) {
+            fixInvalidTags(t, tagChecker, existingTags, files)
+        }
+
+        writeFiles(t, files)
+        return true
     }
 }
